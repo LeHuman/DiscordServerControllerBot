@@ -3,6 +3,7 @@ import os
 import random
 import time
 import urllib.request
+import powerSwitch
 
 import discord
 from discord.ext import commands
@@ -12,15 +13,17 @@ from dotenv import load_dotenv
 from humanfriendly import format_timespan
 
 load_dotenv()
+TARGET_SERVER = os.getenv("TARGET_SERVER")
+API_URL = os.getenv("API_URL")
 TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD = os.getenv("DISCORD_GUILD")
-BOTCOLOR = 0xBA51F7
-BOTROLE = "caster"
+BOTFONT = os.getenv("BOTFONT")
+BOTCOLOR = int(os.getenv("BOTCOLOR"), 16)
+BOTROLE = os.getenv("BOTROLE")
+BOTNAME = os.getenv("BOTNAME")
+BOTCOOLDOWN = int(os.getenv("SERVER_WAIT_POWER")) * 60  # Minimum wait time until we attempt to ping the server
 bot = commands.Bot(command_prefix="!cast ", case_insensitive=True)
 bot.remove_command("help")
-
-TARGET_SERVER = "mc.koolkidz.club"
-API_URL = "https://api.mcsrvstat.us/2/"
 
 cache = ""
 requestCool = 35  # Cooldown on API
@@ -36,9 +39,17 @@ class FONT:
     math = {ord(s): d for s, d in zip(ABCs, "𝓐𝓑𝓒𝓓𝓔𝓕𝓖𝓗𝓘𝓙𝓚𝓛𝓜𝓝𝓞𝓟𝓠𝓡𝓢𝓣𝓤𝓥𝓦𝓧𝓨𝓩𝓪𝓫𝓬𝓭𝓮𝓯𝓰𝓱𝓲𝓳𝓴𝓵𝓶𝓷𝓸𝓹𝓺𝓻𝓼𝓽𝓾𝓿𝔀𝔁𝔂𝔃")}
     band = {ord(s): d for s, d in zip(ABCs, "ᗩᗷᑕᗪEᖴGᕼIᒍKᒪᗰᑎOᑭᑫᖇᔕTᑌᐯᗯ᙭YᘔᗩᗷᑕᗪEᖴGᕼIᒍKᒪᗰᑎOᑭᑫᖇᔕTᑌᐯᗯ᙭Yᘔ")}
     mono = {ord(s): d for s, d in zip(ABCs, "𝙰𝙱𝙲𝙳𝙴𝙵𝙶𝙷𝙸𝙹𝙺𝙻𝙼𝙽𝙾𝙿𝚀𝚁𝚂𝚃𝚄𝚅𝚆𝚇𝚈𝚉𝚊𝚋𝚌𝚍𝚎𝚏𝚐𝚑𝚒𝚓𝚔𝚕𝚖𝚗𝚘𝚙𝚚𝚛𝚜𝚝𝚞𝚟𝚠𝚡𝚢𝚣")}
+    choice = {
+        "goth": goth,
+        "gothBold": gothBold,
+        "smol": smol,
+        "math": math,
+        "band": band,
+        "mono": mono,
+    }
 
 
-SPEECHFONT = FONT.goth
+SPEECHFONT = FONT.choice[BOTFONT] if BOTFONT in FONT.choice else FONT.goth
 
 
 def getEmbedded(speech="", mumble="‎", info="‎", foot="", smallMumble=False, smallFoot=False, mention=None):
@@ -108,16 +119,21 @@ def getEmbeddedFactory(
 
 def spamMsg(time, mention):
     return getEmbedded(
-        "Someone has already casted",
+        "Someone has already casted this",
         "Use the status command to check current status",
         "You must wait for at least " + format_timespan(int(time)) + " before someone casts again",
         mention=mention,
-        smallMumble=True,
     )
 
 
 class BOTMSG:
     class embed:
+        __HelpString = """
+Turn on|off : Turn the server on or off
+Switch on|off : Same as Turn
+Status : Get the status of the server
+Spec : Get server specifications
+Help: Show this message"""
         caster = getEmbeddedFactory("***You are not capable of casting!***", "**you must have the role of caster**")
         serverOn = getEmbeddedFactory("Turning the server on", "This may take a few minutes")
         serverOff = getEmbeddedFactory("Turning the server off", "This may take a few minutes")
@@ -130,18 +146,16 @@ class BOTMSG:
             True,
         )
         helper = getEmbeddedFactory(
-            "Here are the current available casts",
-            infoStr="Turn on|off : Turn the server on or off\nSwitch on|off : Same as Turn\nStatus : Get the status of the server\nHelp: Show this message",
-            footStr="not case sensitive btw",
+            "Here are the current available casts", "All prefixed with !cast ", __HelpString, "not case sensitive btw",
         )
         errorHelp = getEmbeddedFactory(
-            "Allow me to remind you about the available casts",
-            infoStr="Turn on|off : Turn the server on or off\nSwitch on|off : Same as Turn\nStatus : Get the status of the server\nHelp: Show this message",
-            footStr="not case sensitive btw",
+            "Allow me to remind you about the available casts", "All prefixed with !cast ", __HelpString, "not case sensitive btw",
         )
+        spec = getEmbeddedFactory("Here is what I see")
+        specificHelp = getEmbeddedFactory("You haved incorrectly casted")
 
     give = "Here ya go"
-    wait = "Allow me a second".translate(SPEECHFONT) + "..."
+    wait = "Allow me a second".translate(SPEECHFONT)
     what = "What. \n".translate(SPEECHFONT)
     unknown = "I don't understand".translate(SPEECHFONT)
     confused = "You seem confused".translate(SPEECHFONT)
@@ -197,22 +211,29 @@ async def help(ctx):
 
 @bot.command(name="turn")
 @commands.has_role("Caster")
-@commands.cooldown(1, 120, BucketType.default)
+@commands.cooldown(1, BOTCOOLDOWN, BucketType.default)
 @commands.max_concurrency(1, per=BucketType.channel, wait=False)
 async def turn(ctx, state: str = None):
-    if state == None:
-        await ctx.send(embed=BOTMSG.embed.errorHelp(ctx.message.author.mention))
+    if ctx == 0:
         return
-
     if state == "on":
         await ctx.send(embed=BOTMSG.embed.serverOn(ctx.message.author.mention))
         return
-
-    if state == "off":
+    elif state == "off":
         if commands.is_owner():
             await ctx.send(embed=BOTMSG.embed.serverOff(ctx.message.author.mention))
         else:
             raise commands.NotOwner
+        return
+    else:
+        turn.reset_cooldown(ctx)
+        await ctx.send(
+            embed=BOTMSG.embed.specificHelp(
+                ctx.message.author.mention,
+                mumble="Turn command: ",
+                info=f"{ctx.invoked_with.title()} must be followed by an 'on' or 'off'\nEx: !cast {ctx.invoked_with.title()} on",
+            )
+        )
         return
 
     raise commands.UserInputError("Issue with 'Turn' command", state)
@@ -221,6 +242,20 @@ async def turn(ctx, state: str = None):
 @bot.command(name="switch", pass_context=True)
 async def switch(ctx):
     await turn.invoke(ctx)
+
+
+@bot.command(name="spec")
+async def spec(ctx):
+    specs = await powerSwitch.getSpecs()
+    await ctx.send(embed=BOTMSG.embed.spec(ctx.message.author.mention, info=specs, mumble=f"{BOTNAME} powered by Rpi0 v1.3"))
+
+
+@bot.command(name="status")
+async def status(ctx):
+    if APIWillUpdate():
+        await ctx.send(BOTMSG.wait + " " + ctx.message.author.mention)
+    response = getAltStatus(ctx)
+    await ctx.send(embed=response)
 
 
 @bot.command(name="error")
@@ -240,14 +275,6 @@ def refreshCommands(ctx):
     # turnOn.reset_cooldown(ctx)
     # turnOff.reset_cooldown(ctx)
     return
-
-
-@bot.command(name="status")
-async def status(ctx):
-    if APIWillUpdate():
-        await ctx.send(BOTMSG.wait)
-    response = getAltStatus(ctx)
-    await ctx.send(embed=response)
 
 
 helpyRun = False
@@ -274,7 +301,7 @@ async def on_command_error(ctx, error):
                 await ctx.send(BOTMSG.what)
                 time.sleep(2)
             if random.randint(0, 100) < 55:
-                await ctx.send(BOTMSG.confused)
+                await ctx.send(BOTMSG.confused + " " + ctx.message.author.mention)
             await ctx.send(embed=BOTMSG.embed.errorHelp(ctx.message.author.mention))
             refreshCommands(ctx)
             helpyRun = False
