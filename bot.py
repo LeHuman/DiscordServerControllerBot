@@ -293,7 +293,7 @@ async def spec(ctx):
 @bot.command(name="status")
 async def status(ctx):
     if APIWillUpdate():
-        await ctx.send(BOTMSG.wait + " " + ctx)
+        await ctx.send(BOTMSG.wait + " " + ctx.message.author.mention)
     response = getAltStatus(ctx)
     await ctx.send(embed=response)
 
