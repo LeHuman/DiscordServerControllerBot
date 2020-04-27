@@ -2,6 +2,7 @@ import gpiozero
 import asyncio
 from threading import Thread
 import platform
+from gpiozero import PWMOutputDevice as PWM
 import subprocess
 import time
 import os
@@ -17,6 +18,10 @@ SERVER_LOCAL_IP = os.getenv("SERVER_LOCAL_IP")
 SERVER_TIMEOUT_POWER = int(os.getenv("SERVER_TIMEOUT_POWER")) * 60  # Max time to wait after pinging before deeming it unresponsive
 SERVER_INTERVAL_CHECK = int(os.getenv("SERVER_INTERVAL_CHECK"))  # Time between pings in seconds
 SERVER_WAIT_POWER = int(os.getenv("SERVER_WAIT_POWER")) * 60  # Minimum wait time until we attempt to ping the server
+RPI_GPIO_POWER_PIN = int(os.getenv("RPI_GPIO_POWER_PIN"))  # GPIO pin of the RPi that connects to the pc header pin
+RPI_GPIO_LENGTH = int(os.getenv("RPI_GPIO_LENGTH"))  # Length of pulse to send
+RPI_GPIO_POWER = float(os.getenv("RPI_GPIO_POWER"))  # Power output of the GPIO pin
+GPIO_SWITCH = PWM(RPI_GPIO_POWER_PIN)
 
 specString = f"""
 CPU:    {CPU}
@@ -99,8 +104,7 @@ def __monitorState():
 def _turnOn():
     print("Turning On!")
     __monitorState()
-    time.sleep(5)
-    # TODO: add gpio logic
+    GPIO_SWITCH.blink(RPI_GPIO_LENGTH, 0, 0, 0, 1, False)
     print("Done sending on command")
 
 
@@ -108,8 +112,7 @@ def _turnOn():
 def _turnOff():
     print("Turning Off!")
     __monitorState()
-    time.sleep(5)
-    # TODO: add gpio logic
+    GPIO_SWITCH.blink(RPI_GPIO_LENGTH, 0, 0, 0, 1, False)
     print("Done sending off command")
 
 
@@ -187,7 +190,6 @@ async def main():
     print(stat["string"])
     while monitering:
         _ = 1
-        
 
 
 asyncio.run(main())
