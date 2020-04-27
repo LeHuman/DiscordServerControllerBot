@@ -67,7 +67,7 @@ def splitThread(name=None):
 
 
 @splitThread(name="Moniter")
-def __monitorState():
+def __monitorState():  # TODO: also moniter pin connected directly to target server power
     """
         Moniters the server for a change in state indicating
         a command was sucessfully sent
@@ -105,6 +105,7 @@ def _turnOn():
     print("Turning On!")
     __monitorState()
     GPIO_SWITCH.blink(RPI_GPIO_LENGTH, 0, 0, 0, 1, False)
+    time.sleep(2)
     print("Done sending on command")
 
 
@@ -113,12 +114,14 @@ def _turnOff():
     print("Turning Off!")
     __monitorState()
     GPIO_SWITCH.blink(RPI_GPIO_LENGTH, 0, 0, 0, 1, False)
+    time.sleep(2)
     print("Done sending off command")
 
 
 async def sendCommand(cmd):
     """
     Returns True if command sent (str on | off) was passed to the server
+    Returns -1 if an invalid command was sent
     """
     global commandSent
     cmd = str(cmd).lower()
@@ -135,6 +138,7 @@ async def sendCommand(cmd):
             return True
         else:
             print("Invalid command")
+            return -1
     else:
         print("Server is in a mid-state and cannot be sent another command")
     print("Returning to caller")
@@ -175,7 +179,7 @@ async def getSpecs():
     return specString
 
 
-async def main():
+async def __test():
     stat = await status()
     print(stat["string"])
     time.sleep(2)
@@ -190,6 +194,3 @@ async def main():
     print(stat["string"])
     while monitering:
         _ = 1
-
-
-asyncio.run(main())

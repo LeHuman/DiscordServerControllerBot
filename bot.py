@@ -3,7 +3,7 @@ import os
 import random
 import time
 import urllib.request
-import powerSwitch
+import powerSwitch as PS
 
 import discord
 from discord.ext import commands
@@ -52,7 +52,7 @@ class FONT:
 SPEECHFONT = FONT.choice[BOTFONT] if BOTFONT in FONT.choice else FONT.goth
 
 
-def getEmbedded(speech="", mumble="‎", info="‎", foot="", smallMumble=False, smallFoot=False, mention=None):
+def getEmbedded(speech="", mumble="‎", info="‎", foot="", smallMumble=False, smallFoot=False, ctx=None):
     speech = str(speech).translate(SPEECHFONT)
     if smallFoot:
         foot = str(foot).translate(FONT.smol)
@@ -64,7 +64,7 @@ def getEmbedded(speech="", mumble="‎", info="‎", foot="", smallMumble=False,
         else:
             mumble = str(mumble)
 
-    embed = discord.Embed(title=speech, color=BOTCOLOR, description=mention if mention else "")
+    embed = discord.Embed(title=speech, color=BOTCOLOR, description=ctx.message.author.mention if ctx else "")
     embed.add_field(name=mumble, value=info)
 
     if foot != "":
@@ -99,9 +99,11 @@ def getEmbeddedFactory(
         else:
             footStr = str(footStr)
 
-    def embedLoad(mention=None, speech="", mumble="‎", info="‎", foot=""):
+    def embedLoad(ctx=None, speech="", mumble="‎", info="‎", foot=""):
         embed = discord.Embed(
-            title=str(speech).translate(SPEECHFONT) if rSpch else speechStr, color=BOTCOLOR, description=mention if mention else "",
+            title=str(speech).translate(SPEECHFONT) if rSpch else speechStr,
+            color=BOTCOLOR,
+            description=ctx.message.author.mention if ctx else "",
         )
         embed.add_field(
             name=mumble if rMmbl and str(mumble) != "‎" else mumbleStr,
@@ -117,12 +119,12 @@ def getEmbeddedFactory(
     return embedLoad
 
 
-def spamMsg(time, mention):
+def spamMsg(time, ctx):
     return getEmbedded(
         "Someone has already casted this",
         "Use the status command to check current status",
         "You must wait for at least " + format_timespan(int(time)) + " before someone casts again",
-        mention=mention,
+        ctx=ctx,
     )
 
 
@@ -145,6 +147,7 @@ Help: Show this message"""
             "fuck",
             True,
         )
+        warning = getEmbeddedFactory("There may be an issue", "Report this issue to owner")
         helper = getEmbeddedFactory(
             "Here are the current available casts", "All prefixed with !cast ", __HelpString, "not case sensitive btw",
         )
@@ -174,7 +177,7 @@ def formatAPImsg(ctx, data):
         apiUpdate = curr
     lastapiUpdate = format_timespan(curr - apiUpdate + curr - requestTime)
     lastUpdate = "last update: " + lastapiUpdate + " ago"
-    return getEmbedded(BOTMSG.give, lastUpdate, final, "mcsrvstat.us", mention=ctx.message.author.mention)
+    return getEmbedded(BOTMSG.give, lastUpdate, final, "mcsrvstat.us", ctx=ctx)
 
 
 def APIWillUpdate():
@@ -195,8 +198,29 @@ def getAltStatus(ctx, data=None):
                 return getAltStatus(ctx, cache)
     except Exception as e:
         print(e)
-        return BOTMSG.embed.error(ctx.message.author.mention)
+        return BOTMSG.embed.error(ctx)
     return formatAPImsg(ctx, data)
+
+
+async def sendFinalCommand(ctx, cmd):
+    final = False
+    if await PS.canSend():
+        final = await PS.sendCommand(cmd)
+    else:
+        return "Warning: Server indicates that it has already sent\na command and is still awaiting a response"
+
+    if final == -1:
+        return "Error: uhm, im not sure how this happened.\nPlease report this issue to our issuing department"
+
+    status = await PS.status()
+    stsWarn = "Warning: "
+    if status["timeout"]:
+        stsWarn += "The last command sent never recieved a response from the server"
+    if status["mismatch"]:
+        stsWarn += ("\n" if status["timeout"] else "") + "Server indicates that there may be a network issue"
+    if stsWarn != "Warning: ":
+        return stsWarn
+    return
 
 
 @bot.event
@@ -206,7 +230,7 @@ async def on_ready():
 
 @bot.command(name="help")
 async def help(ctx):
-    await ctx.send(embed=BOTMSG.embed.helper(ctx.message.author.mention))
+    await ctx.send(embed=BOTMSG.embed.helper(ctx))
 
 
 @bot.command(name="turn")
@@ -216,12 +240,28 @@ async def help(ctx):
 async def turn(ctx, state: str = None):
     if ctx == 0:
         return
+    if not await PS.canSend():
+        await ctx.send(
+            embed=BOTMSG.embed.warning(
+                ctx, info="Server indicates that it has already sent\na command and is still awaiting a response\nPlease try again later"
+            )
+        )
+        turn.reset_cooldown(ctx)
+        return
     if state == "on":
-        await ctx.send(embed=BOTMSG.embed.serverOn(ctx.message.author.mention))
+        info = await sendFinalCommand(ctx, state)
+        if info:
+            await ctx.send(embed=BOTMSG.embed.serverOn(ctx, info=info))
+        else:
+            await ctx.send(embed=BOTMSG.embed.serverOn(ctx))
         return
     elif state == "off":
         if commands.is_owner():
-            await ctx.send(embed=BOTMSG.embed.serverOff(ctx.message.author.mention))
+            info = await sendFinalCommand(ctx, state)
+            if info:
+                await ctx.send(embed=BOTMSG.embed.serverOn(ctx, info=info))
+            else:
+                await ctx.send(embed=BOTMSG.embed.serverOn(ctx))
         else:
             raise commands.NotOwner
         return
@@ -229,8 +269,8 @@ async def turn(ctx, state: str = None):
         turn.reset_cooldown(ctx)
         await ctx.send(
             embed=BOTMSG.embed.specificHelp(
-                ctx.message.author.mention,
-                mumble="Turn command: ",
+                ctx,
+                mumble=f"{ctx.invoked_with.title()} command: ",
                 info=f"{ctx.invoked_with.title()} must be followed by an 'on' or 'off'\nEx: !cast {ctx.invoked_with.title()} on",
             )
         )
@@ -246,14 +286,14 @@ async def switch(ctx):
 
 @bot.command(name="spec")
 async def spec(ctx):
-    specs = await powerSwitch.getSpecs()
-    await ctx.send(embed=BOTMSG.embed.spec(ctx.message.author.mention, info=specs, mumble=f"{BOTNAME} powered by Rpi0 v1.3"))
+    specs = await PS.getSpecs()
+    await ctx.send(embed=BOTMSG.embed.spec(ctx, info=specs, mumble=f"{BOTNAME} powered by Rpi0 v1.3"))
 
 
 @bot.command(name="status")
 async def status(ctx):
     if APIWillUpdate():
-        await ctx.send(BOTMSG.wait + " " + ctx.message.author.mention)
+        await ctx.send(BOTMSG.wait + " " + ctx)
     response = getAltStatus(ctx)
     await ctx.send(embed=response)
 
@@ -261,20 +301,13 @@ async def status(ctx):
 @bot.command(name="error")
 @commands.is_owner()
 async def error(ctx):
-    await ctx.send(embed=BOTMSG.embed.error(ctx.message.author.mention))
+    await ctx.send(embed=BOTMSG.embed.error(ctx))
 
 
 @bot.command(name="clear")
 @commands.is_owner()
 async def clear(ctx):
     await ctx.send("‎\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n‎")
-
-
-# TODO: Check if server is actually up and running then reset cooldown if so
-def refreshCommands(ctx):
-    # turnOn.reset_cooldown(ctx)
-    # turnOff.reset_cooldown(ctx)
-    return
 
 
 helpyRun = False
@@ -301,21 +334,20 @@ async def on_command_error(ctx, error):
                 await ctx.send(BOTMSG.what)
                 time.sleep(2)
             if random.randint(0, 100) < 55:
-                await ctx.send(BOTMSG.confused + " " + ctx.message.author.mention)
-            await ctx.send(embed=BOTMSG.embed.errorHelp(ctx.message.author.mention))
-            refreshCommands(ctx)
+                await ctx.send(BOTMSG.confused + " " + ctx)
+            await ctx.send(embed=BOTMSG.embed.errorHelp(ctx))
             helpyRun = False
         else:
             return
 
     if isinstance(error, cool):
-        await ctx.send(embed=spamMsg(error.retry_after, ctx.message.author.mention))
+        await ctx.send(embed=spamMsg(error.retry_after, ctx))
 
     if isinstance(error, role):
-        await ctx.send(embed=BOTMSG.embed.caster(ctx.message.author.mention))
+        await ctx.send(embed=BOTMSG.embed.caster(ctx))
 
     if isinstance(error, owner):
-        await ctx.send(embed=BOTMSG.embed.lack(ctx.message.author.mention))
+        await ctx.send(embed=BOTMSG.embed.lack(ctx))
 
     if isinstance(error, commands.BadArgument):
         await ctx.send(BOTMSG.unknown)
